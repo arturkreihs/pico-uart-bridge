@@ -15,7 +15,7 @@
 #define MIN(a, b) ((a > b) ? b : a)
 #endif /* MIN */
 
-#define LED_PIN 25
+//#define LED_PIN 25
 
 #define BUFFER_SIZE 2560
 
@@ -52,8 +52,8 @@ const uart_id_t UART_ID[CFG_TUD_CDC] = {
 		.inst = uart0,
 		.irq = UART0_IRQ,
 		.irq_fn = &uart0_irq_fn,
-		.tx_pin = 16,
-		.rx_pin = 17,
+		.tx_pin = 12,
+		.rx_pin = 13,
 	}, {
 		.inst = uart1,
 		.irq = UART1_IRQ,
@@ -197,7 +197,7 @@ void core1_entry(void)
 			}
 		}
 
-		gpio_put(LED_PIN, con);
+//		gpio_put(LED_PIN, con);
 	}
 }
 
@@ -306,8 +306,8 @@ int main(void)
 	for (itf = 0; itf < CFG_TUD_CDC; itf++)
 		init_uart_data(itf);
 
-	gpio_init(LED_PIN);
-	gpio_set_dir(LED_PIN, GPIO_OUT);
+//	gpio_init(LED_PIN);
+//	gpio_set_dir(LED_PIN, GPIO_OUT);
 
 	multicore_launch_core1(core1_entry);
 
