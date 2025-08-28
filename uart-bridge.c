@@ -6,16 +6,25 @@
 #include <hardware/irq.h>
 #include <hardware/structs/sio.h>
 #include <hardware/uart.h>
+#include <hardware/pio.h>
+#include <hardware/clocks.h>
 #include <pico/multicore.h>
 #include <pico/stdlib.h>
 #include <string.h>
 #include <tusb.h>
+
+#include "ws2812.pio.h"
 
 #if !defined(MIN)
 #define MIN(a, b) ((a > b) ? b : a)
 #endif /* MIN */
 
 //#define LED_PIN 25
+#define WS2812_PIN 16
+#define COLOR_IDLE 0x02020200
+#define COLOR_TX0  0x22020200
+#define COLOR_TX1  0x02220200
+#define PIO_SM 0
 
 #define BUFFER_SIZE 2560
 
@@ -44,6 +53,8 @@ typedef struct {
 	mutex_t usb_mtx;
 } uart_data_t;
 
+static PIO pio = pio0;
+
 void uart0_irq_fn(void);
 void uart1_irq_fn(void);
 
@@ -64,6 +75,23 @@ const uart_id_t UART_ID[CFG_TUD_CDC] = {
 };
 
 uart_data_t UART_DATA[CFG_TUD_CDC];
+
+static inline void ws2812_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
+    pio_gpio_init(pio, pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+
+    pio_sm_config c = ws2812_program_get_default_config(offset);
+    sm_config_set_sideset_pins(&c, pin);
+    sm_config_set_out_shift(&c, false, true, 24);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    int cycles_per_bit = ws2812_T1 + ws2812_T2 + ws2812_T3;
+    float div = clock_get_hz(clk_sys) / (freq * cycles_per_bit);
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
 
 static inline uint databits_usb2uart(uint8_t data_bits)
 {
@@ -237,6 +265,7 @@ void uart_write_bytes(uint8_t itf)
 	    mutex_try_enter(&ud->usb_mtx, NULL)) {
 		const uart_id_t *ui = &UART_ID[itf];
 		uint32_t count = 0;
+        pio_sm_put(pio, PIO_SM, itf == 0 ? COLOR_TX0 : COLOR_TX1);
 
 		while (uart_is_writable(ui->inst) &&
 		       count < ud->usb_pos) {
@@ -249,6 +278,7 @@ void uart_write_bytes(uint8_t itf)
 			       ud->usb_pos - count);
 		ud->usb_pos -= count;
 
+        pio_sm_put(pio, PIO_SM, COLOR_IDLE);
 		mutex_exit(&ud->usb_mtx);
 	}
 }
@@ -309,7 +339,12 @@ int main(void)
 //	gpio_init(LED_PIN);
 //	gpio_set_dir(LED_PIN, GPIO_OUT);
 
+    uint offset = pio_add_program(pio, &ws2812_program);
+    ws2812_init(pio, PIO_SM, offset, WS2812_PIN, 800000.0f);
+
 	multicore_launch_core1(core1_entry);
+
+    pio_sm_put(pio, PIO_SM, COLOR_IDLE);
 
 	while (1) {
 		for (itf = 0; itf < CFG_TUD_CDC; itf++) {
