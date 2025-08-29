@@ -21,9 +21,9 @@
 
 //#define LED_PIN 25
 #define WS2812_PIN 16
-#define COLOR_IDLE 0x02020200
-#define COLOR_TX0  0x22020200
-#define COLOR_TX1  0x02220200
+#define COLOR_IDLE 0x00000000
+#define COLOR_TX0  0x00220000
+#define COLOR_TX1  0x00002200
 #define PIO_SM 0
 
 #define BUFFER_SIZE 2560
@@ -234,6 +234,7 @@ static inline void uart_read_bytes(uint8_t itf)
 	uart_data_t *ud = &UART_DATA[itf];
 	const uart_id_t *ui = &UART_ID[itf];
 
+//    pio_sm_put(pio, PIO_SM, itf == 0 ? COLOR_TX0 : COLOR_TX1);
 	if (uart_is_readable(ui->inst)) {
 		mutex_enter_blocking(&ud->uart_mtx);
 
@@ -245,6 +246,8 @@ static inline void uart_read_bytes(uint8_t itf)
 
 		mutex_exit(&ud->uart_mtx);
 	}
+//    sleep_us(400);
+//    pio_sm_put(pio, PIO_SM, COLOR_IDLE);
 }
 
 void uart0_irq_fn(void)
@@ -265,7 +268,6 @@ void uart_write_bytes(uint8_t itf)
 	    mutex_try_enter(&ud->usb_mtx, NULL)) {
 		const uart_id_t *ui = &UART_ID[itf];
 		uint32_t count = 0;
-        pio_sm_put(pio, PIO_SM, itf == 0 ? COLOR_TX0 : COLOR_TX1);
 
 		while (uart_is_writable(ui->inst) &&
 		       count < ud->usb_pos) {
@@ -278,7 +280,6 @@ void uart_write_bytes(uint8_t itf)
 			       ud->usb_pos - count);
 		ud->usb_pos -= count;
 
-        pio_sm_put(pio, PIO_SM, COLOR_IDLE);
 		mutex_exit(&ud->usb_mtx);
 	}
 }
