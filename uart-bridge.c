@@ -8,6 +8,7 @@
 #include <hardware/uart.h>
 #include <hardware/pio.h>
 #include <hardware/clocks.h>
+#include <hardware/timer.h>
 #include <pico/multicore.h>
 #include <pico/stdlib.h>
 #include <string.h>
@@ -22,8 +23,9 @@
 //#define LED_PIN 25
 #define WS2812_PIN 16
 #define COLOR_IDLE 0x00000000
-#define COLOR_TX0  0x00220000
-#define COLOR_TX1  0x00002200
+#define COLOR_INIT 0x00002200
+#define COLOR_TX0  0x22000000
+#define COLOR_TX1  0x00220000
 #define PIO_SM 0
 
 #define BUFFER_SIZE 2560
@@ -54,6 +56,7 @@ typedef struct {
 } uart_data_t;
 
 static PIO pio = pio0;
+static bool timer_active = false;
 
 void uart0_irq_fn(void);
 void uart1_irq_fn(void);
@@ -76,7 +79,7 @@ const uart_id_t UART_ID[CFG_TUD_CDC] = {
 
 uart_data_t UART_DATA[CFG_TUD_CDC];
 
-static inline void ws2812_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
+static inline void ws2812_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
     pio_gpio_init(pio, pin);
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
 
@@ -170,7 +173,6 @@ void usb_read_bytes(uint8_t itf)
 			count = tud_cdc_n_read(itf, &ud->usb_buffer[ud->usb_pos], len);
 			ud->usb_pos += count;
 		}
-
 		mutex_exit(&ud->usb_mtx);
 	}
 }
@@ -214,19 +216,32 @@ void core1_entry(void)
 
 	while (1) {
 		int itf;
-		int con = 0;
 
 		tud_task();
 
 		for (itf = 0; itf < CFG_TUD_CDC; itf++) {
 			if (tud_cdc_n_connected(itf)) {
-				con = 1;
 				usb_cdc_process(itf);
 			}
 		}
-
-//		gpio_put(LED_PIN, con);
 	}
+}
+
+int64_t timer_callback(alarm_id_t id, void *user_data) {
+    timer_active = false;
+    pio_sm_put(pio, PIO_SM, COLOR_IDLE);
+    return 0;
+}
+
+void ws2812_blink(uint32_t color) {
+    if (timer_active) { return; }
+
+    pio_sm_put(pio, PIO_SM, color);
+    alarm_id_t timer_id = add_alarm_in_ms(20, timer_callback, NULL, false);
+
+    if (timer_id > 0) {
+        timer_active = true;
+    }
 }
 
 static inline void uart_read_bytes(uint8_t itf)
@@ -234,9 +249,10 @@ static inline void uart_read_bytes(uint8_t itf)
 	uart_data_t *ud = &UART_DATA[itf];
 	const uart_id_t *ui = &UART_ID[itf];
 
-//    pio_sm_put(pio, PIO_SM, itf == 0 ? COLOR_TX0 : COLOR_TX1);
 	if (uart_is_readable(ui->inst)) {
 		mutex_enter_blocking(&ud->uart_mtx);
+
+        ws2812_blink(itf == 0 ? COLOR_TX0 : COLOR_TX1);
 
 		while (uart_is_readable(ui->inst) &&
 		       (ud->uart_pos < BUFFER_SIZE)) {
@@ -246,8 +262,6 @@ static inline void uart_read_bytes(uint8_t itf)
 
 		mutex_exit(&ud->uart_mtx);
 	}
-//    sleep_us(400);
-//    pio_sm_put(pio, PIO_SM, COLOR_IDLE);
 }
 
 void uart0_irq_fn(void)
@@ -268,6 +282,8 @@ void uart_write_bytes(uint8_t itf)
 	    mutex_try_enter(&ud->usb_mtx, NULL)) {
 		const uart_id_t *ui = &UART_ID[itf];
 		uint32_t count = 0;
+
+        ws2812_blink(itf == 0 ? COLOR_TX0 : COLOR_TX1);
 
 		while (uart_is_writable(ui->inst) &&
 		       count < ud->usb_pos) {
@@ -337,15 +353,12 @@ int main(void)
 	for (itf = 0; itf < CFG_TUD_CDC; itf++)
 		init_uart_data(itf);
 
-//	gpio_init(LED_PIN);
-//	gpio_set_dir(LED_PIN, GPIO_OUT);
-
     uint offset = pio_add_program(pio, &ws2812_program);
-    ws2812_init(pio, PIO_SM, offset, WS2812_PIN, 800000.0f);
+    ws2812_program_init(pio, PIO_SM, offset, WS2812_PIN, 800000.0f);
 
 	multicore_launch_core1(core1_entry);
 
-    pio_sm_put(pio, PIO_SM, COLOR_IDLE);
+    ws2812_blink(COLOR_INIT);
 
 	while (1) {
 		for (itf = 0; itf < CFG_TUD_CDC; itf++) {
