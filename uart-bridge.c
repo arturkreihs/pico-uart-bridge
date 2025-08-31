@@ -358,6 +358,7 @@ int main(void)
 
 	multicore_launch_core1(core1_entry);
 
+    sleep_ms(50);
     ws2812_blink(COLOR_INIT);
 
 	while (1) {
