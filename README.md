@@ -12,6 +12,7 @@ This software is provided without warranty, according to the MIT License, and sh
 
 Raspberry Pi Pico Zero Pinout
 ------------------------
+<img src="https://raw.githubusercontent.com/arturkreihs/pico-uart-bridge/refs/heads/master/image.jpg" align="center" width="350" >
 
 | Rpi Pico Zero | Function |
 |:-:|:-:|
